@@ -17,8 +17,10 @@ import {
   Server,
   Store,
 } from "lucide-react"
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
+import { UserMenu } from "@/components/user-menu"
+import { getSupabaseBrowserClient } from "@/lib/supabase/client"
 
 const navItems = [
   { href: "/", label: "Agents", icon: Bot },
@@ -36,6 +38,43 @@ const navItems = [
 export function Sidebar() {
   const pathname = usePathname()
   const [collapsed, setCollapsed] = useState(false)
+  const [user, setUser] = useState<any>(null)
+  const [isSupabaseEnabled, setIsSupabaseEnabled] = useState(false)
+
+  useEffect(() => {
+    const supabase = getSupabaseBrowserClient()
+
+    if (!supabase) {
+      setIsSupabaseEnabled(false)
+      return
+    }
+
+    setIsSupabaseEnabled(true)
+
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (user) {
+        supabase
+          .from("profiles")
+          .select("*")
+          .eq("id", user.id)
+          .single()
+          .then(({ data }) => setUser(data))
+      }
+    })
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (session?.user) {
+        const { data } = await supabase.from("profiles").select("*").eq("id", session.user.id).single()
+        setUser(data)
+      } else {
+        setUser(null)
+      }
+    })
+
+    return () => subscription.unsubscribe()
+  }, [])
 
   return (
     <aside
@@ -86,11 +125,17 @@ export function Sidebar() {
       </nav>
 
       <div className="p-4 border-t border-border">
-        {!collapsed && (
-          <div className="text-xs text-muted-foreground">
-            <p>AgentKit v1.0</p>
-            <p className="mt-1">Powered by AI SDK</p>
+        {isSupabaseEnabled && user ? (
+          <div className={cn(collapsed && "flex justify-center")}>
+            <UserMenu user={user} />
           </div>
+        ) : (
+          !collapsed && (
+            <div className="text-xs text-muted-foreground">
+              <p>AgentKit v1.0</p>
+              <p className="mt-1">Powered by AI SDK</p>
+            </div>
+          )
         )}
       </div>
     </aside>
