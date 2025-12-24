@@ -154,6 +154,32 @@ class WorkflowStore {
     workflow.updatedAt = new Date()
     return workflow.connections.length < initialLength
   }
+
+  // Export/import methods
+  exportWorkflow(id: string): string | undefined {
+    const workflow = this.workflows.get(id)
+    if (!workflow) return undefined
+
+    return JSON.stringify(workflow, null, 2)
+  }
+
+  importWorkflow(jsonData: string): Workflow | undefined {
+    try {
+      const data = JSON.parse(jsonData)
+      const newWorkflow: Workflow = {
+        ...data,
+        id: crypto.randomUUID(),
+        version: 1,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }
+      this.workflows.set(newWorkflow.id, newWorkflow)
+      return newWorkflow
+    } catch (error) {
+      console.error("Failed to import workflow:", error)
+      return undefined
+    }
+  }
 }
 
 export const workflowStore = new WorkflowStore()

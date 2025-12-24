@@ -2,8 +2,8 @@
 
 import type React from "react"
 
-import { useState, useCallback, useRef } from "react"
-import { Play, ZoomIn, ZoomOut, Maximize2, Save, Undo, Redo } from "lucide-react"
+import { useState, useCallback, useRef, useEffect } from "react"
+import { Play, ZoomIn, ZoomOut, Maximize2, Save, Undo, Redo, History, ArrowDownUp } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import type { WorkflowNode, Position, NodeType, CanvasState, Workflow } from "@/lib/workflow-types"
@@ -11,6 +11,11 @@ import { NodeSidebar } from "./node-sidebar"
 import { CanvasNode } from "./canvas-node"
 import { NodePropertiesPanel } from "./node-properties-panel"
 import useSWR, { mutate } from "swr"
+import { ExecutionMonitor } from "./execution-monitor"
+import { VersionHistoryPanel } from "./version-history-panel"
+import { ExportImportDialog } from "./export-import-dialog"
+import { getHistoryManager } from "@/lib/history-manager"
+import { useToast } from "@/hooks/use-toast"
 
 const fetcher = (url: string) => fetch(url).then((res) => res.json())
 
@@ -21,8 +26,12 @@ const MAX_ZOOM = 2
 export function BuilderCanvas() {
   const canvasRef = useRef<HTMLDivElement>(null)
   const [workflowId, setWorkflowId] = useState<string>("default-workflow")
+  const { toast } = useToast()
 
   const { data: workflow, isLoading } = useSWR<Workflow>(`/api/workflows/${workflowId}`, fetcher)
+  const { data: historyStatus } = useSWR(`/api/workflows/${workflowId}/history/status`, fetcher, {
+    refreshInterval: 500,
+  })
 
   const [canvasState, setCanvasState] = useState<CanvasState>({
     zoom: 1,
@@ -39,8 +48,15 @@ export function BuilderCanvas() {
   const [showSidebar, setShowSidebar] = useState(true)
   const [showProperties, setShowProperties] = useState(true)
   const [mousePos, setMousePos] = useState<Position>({ x: 0, y: 0 })
+  const [showVersionHistory, setShowVersionHistory] = useState(false)
 
-  // Handle zoom
+  const saveToHistory = useCallback(() => {
+    if (workflow) {
+      const historyManager = getHistoryManager(workflowId)
+      historyManager.saveState(workflow)
+    }
+  }, [workflow, workflowId])
+
   const handleZoom = useCallback((delta: number) => {
     setCanvasState((prev) => ({
       ...prev,
@@ -48,7 +64,6 @@ export function BuilderCanvas() {
     }))
   }, [])
 
-  // Handle wheel zoom
   const handleWheel = useCallback(
     (e: React.WheelEvent) => {
       if (e.ctrlKey || e.metaKey) {
@@ -60,7 +75,6 @@ export function BuilderCanvas() {
     [handleZoom],
   )
 
-  // Handle pan start
   const handleMouseDown = useCallback(
     (e: React.MouseEvent) => {
       if (e.button === 1 || (e.button === 0 && e.altKey)) {
@@ -73,7 +87,6 @@ export function BuilderCanvas() {
     [canvasState.pan],
   )
 
-  // Handle pan move
   const handleMouseMove = useCallback(
     (e: React.MouseEvent) => {
       const rect = canvasRef.current?.getBoundingClientRect()
@@ -94,21 +107,19 @@ export function BuilderCanvas() {
     [isPanning, panStart, canvasState.zoom, canvasState.pan],
   )
 
-  // Handle pan end
   const handleMouseUp = useCallback(() => {
     setIsPanning(false)
     setCanvasState((prev) => ({ ...prev, isConnecting: false, connectionStart: null }))
   }, [])
 
-  // Handle node selection
   const handleNodeSelect = useCallback((nodeId: string) => {
     setCanvasState((prev) => ({ ...prev, selectedNodeId: nodeId, selectedConnectionId: null }))
   }, [])
 
-  // Handle node drag
   const handleNodeDrag = useCallback(
     async (nodeId: string, position: Position) => {
-      // Snap to grid
+      saveToHistory()
+
       const snappedPosition = {
         x: Math.round(position.x / GRID_SIZE) * GRID_SIZE,
         y: Math.round(position.y / GRID_SIZE) * GRID_SIZE,
@@ -121,10 +132,9 @@ export function BuilderCanvas() {
       })
       mutate(`/api/workflows/${workflowId}`)
     },
-    [workflowId],
+    [workflowId, saveToHistory],
   )
 
-  // Handle connection start
   const handleConnectionStart = useCallback((nodeId: string, handle: string) => {
     setCanvasState((prev) => ({
       ...prev,
@@ -133,12 +143,13 @@ export function BuilderCanvas() {
     }))
   }, [])
 
-  // Handle connection end
   const handleConnectionEnd = useCallback(
     async (targetNodeId: string) => {
       if (!canvasState.connectionStart || canvasState.connectionStart.nodeId === targetNodeId) {
         return
       }
+
+      saveToHistory()
 
       await fetch(`/api/workflows/${workflowId}/connections`, {
         method: "POST",
@@ -151,22 +162,24 @@ export function BuilderCanvas() {
       mutate(`/api/workflows/${workflowId}`)
       setCanvasState((prev) => ({ ...prev, isConnecting: false, connectionStart: null }))
     },
-    [canvasState.connectionStart, workflowId],
+    [canvasState.connectionStart, workflowId, saveToHistory],
   )
 
-  // Handle node delete
   const handleNodeDelete = useCallback(
     async (nodeId: string) => {
+      saveToHistory()
+
       await fetch(`/api/workflows/${workflowId}/nodes/${nodeId}`, { method: "DELETE" })
       mutate(`/api/workflows/${workflowId}`)
       setCanvasState((prev) => ({ ...prev, selectedNodeId: null }))
     },
-    [workflowId],
+    [workflowId, saveToHistory],
   )
 
-  // Handle add node from sidebar
   const handleAddNode = useCallback(
     async (type: NodeType) => {
+      saveToHistory()
+
       const centerX = (window.innerWidth / 2 - canvasState.pan.x) / canvasState.zoom
       const centerY = (window.innerHeight / 2 - canvasState.pan.y) / canvasState.zoom
 
@@ -197,20 +210,100 @@ export function BuilderCanvas() {
       })
       mutate(`/api/workflows/${workflowId}`)
     },
-    [workflowId, canvasState.pan, canvasState.zoom],
+    [workflowId, canvasState.pan, canvasState.zoom, saveToHistory],
   )
 
-  // Reset view
+  const handleUndo = useCallback(async () => {
+    await fetch(`/api/workflows/${workflowId}/undo`, { method: "POST" })
+    mutate(`/api/workflows/${workflowId}`)
+    mutate(`/api/workflows/${workflowId}/history/status`)
+  }, [workflowId])
+
+  const handleRedo = useCallback(async () => {
+    await fetch(`/api/workflows/${workflowId}/redo`, { method: "POST" })
+    mutate(`/api/workflows/${workflowId}`)
+    mutate(`/api/workflows/${workflowId}/history/status`)
+  }, [workflowId])
+
+  const handleCopy = useCallback(async () => {
+    if (!canvasState.selectedNodeId) return
+
+    const response = await fetch(`/api/workflows/${workflowId}/copy`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ nodeIds: [canvasState.selectedNodeId] }),
+    })
+
+    if (response.ok) {
+      toast({ title: "Node copied to clipboard" })
+    }
+  }, [canvasState.selectedNodeId, workflowId, toast])
+
+  const handlePaste = useCallback(async () => {
+    saveToHistory()
+
+    const response = await fetch(`/api/workflows/${workflowId}/paste`, {
+      method: "POST",
+    })
+
+    if (response.ok) {
+      const result = await response.json()
+      mutate(`/api/workflows/${workflowId}`)
+      toast({ title: `Pasted ${result.nodeIds.length} node(s)` })
+    } else {
+      toast({ title: "Nothing to paste", variant: "destructive" })
+    }
+  }, [workflowId, saveToHistory, toast])
+
+  const handleDuplicate = useCallback(async () => {
+    if (!canvasState.selectedNodeId) return
+
+    saveToHistory()
+
+    await fetch(`/api/workflows/${workflowId}/copy`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ nodeIds: [canvasState.selectedNodeId] }),
+    })
+
+    await fetch(`/api/workflows/${workflowId}/paste`, {
+      method: "POST",
+    })
+
+    mutate(`/api/workflows/${workflowId}`)
+    toast({ title: "Node duplicated" })
+  }, [canvasState.selectedNodeId, workflowId, saveToHistory, toast])
+
+  const handleSelectAll = useCallback(() => {
+    if (workflow?.nodes.length) {
+      setCanvasState((prev) => ({ ...prev, selectedNodeId: workflow.nodes[0].id }))
+    }
+  }, [workflow])
+
+  const handleAutoLayout = useCallback(async () => {
+    saveToHistory()
+
+    const response = await fetch(`/api/workflows/${workflowId}/auto-layout`, {
+      method: "POST",
+    })
+
+    if (response.ok) {
+      mutate(`/api/workflows/${workflowId}`)
+      toast({ title: "Layout applied successfully" })
+    } else {
+      toast({ title: "Failed to apply layout", variant: "destructive" })
+    }
+  }, [workflowId, saveToHistory, toast])
+
   const handleResetView = useCallback(() => {
     setCanvasState((prev) => ({ ...prev, zoom: 1, pan: { x: 0, y: 0 } }))
   }, [])
 
-  // Get connection path
   const getConnectionPath = (source: WorkflowNode, target: WorkflowNode) => {
-    const sourceX = source.position.x + 140 // Node width / 2
-    const sourceY = source.position.y + 40 // Output handle position
+    const sourceX = source.position.x + 150 // Updated for new node width (300px)
+    const sourceY = source.position.y + 40
     const targetX = target.position.x
-    const targetY = target.position.y + 40 // Input handle position
+    const targetY = target.position.y + 40
 
     const dx = targetX - sourceX
     const controlPointOffset = Math.min(Math.abs(dx) / 2, 100)
@@ -219,6 +312,75 @@ export function BuilderCanvas() {
   }
 
   const selectedNode = workflow?.nodes.find((n) => n.id === canvasState.selectedNodeId)
+
+  const [showExecutionMonitor, setShowExecutionMonitor] = useState(false)
+  const [highlightedNodeId, setHighlightedNodeId] = useState<string | null>(null)
+
+  const handleSaveVersion = useCallback(async () => {
+    await fetch(`/api/workflows/${workflowId}/versions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ description: "Manual save" }),
+    })
+  }, [workflowId])
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
+        e.preventDefault()
+        handleUndo()
+      } else if ((e.ctrlKey || e.metaKey) && (e.key === "y" || (e.key === "z" && e.shiftKey))) {
+        e.preventDefault()
+        handleRedo()
+      } else if ((e.ctrlKey || e.metaKey) && e.key === "c") {
+        e.preventDefault()
+        handleCopy()
+      } else if ((e.ctrlKey || e.metaKey) && e.key === "v") {
+        e.preventDefault()
+        handlePaste()
+      } else if ((e.ctrlKey || e.metaKey) && e.key === "d") {
+        e.preventDefault()
+        handleDuplicate()
+      } else if ((e.ctrlKey || e.metaKey) && e.key === "a") {
+        e.preventDefault()
+        handleSelectAll()
+      } else if ((e.key === "Delete" || e.key === "Backspace") && canvasState.selectedNodeId) {
+        e.preventDefault()
+        handleNodeDelete(canvasState.selectedNodeId)
+      } else if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+        e.preventDefault()
+        handleSaveVersion()
+      } else if ((e.ctrlKey || e.metaKey) && e.key === "=") {
+        e.preventDefault()
+        handleZoom(0.1)
+      } else if ((e.ctrlKey || e.metaKey) && e.key === "-") {
+        e.preventDefault()
+        handleZoom(-0.1)
+      } else if ((e.ctrlKey || e.metaKey) && e.key === "0") {
+        e.preventDefault()
+        handleResetView()
+      } else if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === "L") {
+        e.preventDefault()
+        handleAutoLayout()
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [
+    handleUndo,
+    handleRedo,
+    handleCopy,
+    handlePaste,
+    handleDuplicate,
+    handleSelectAll,
+    handleNodeDelete,
+    handleSaveVersion,
+    handleZoom,
+    handleResetView,
+    handleAutoLayout,
+    canvasState.selectedNodeId,
+  ])
 
   if (isLoading) {
     return (
@@ -230,12 +392,9 @@ export function BuilderCanvas() {
 
   return (
     <div className="flex h-screen bg-background overflow-hidden">
-      {/* Node Sidebar */}
       <NodeSidebar isOpen={showSidebar} onToggle={() => setShowSidebar(!showSidebar)} onAddNode={handleAddNode} />
 
-      {/* Main Canvas Area */}
       <div className="flex-1 flex flex-col">
-        {/* Toolbar */}
         <div className="h-14 border-b border-border bg-card flex items-center justify-between px-4">
           <div className="flex items-center gap-2">
             <h1 className="font-semibold text-lg">{workflow?.name || "Untitled Workflow"}</h1>
@@ -245,13 +404,33 @@ export function BuilderCanvas() {
           </div>
 
           <div className="flex items-center gap-1">
-            <Button variant="ghost" size="icon" className="h-8 w-8">
+            <ExportImportDialog
+              workflowId={workflowId}
+              onImportSuccess={() => mutate(`/api/workflows/${workflowId}`)}
+            />
+            <div className="w-px h-6 bg-border mx-2" />
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              onClick={handleUndo}
+              disabled={!historyStatus?.canUndo}
+            >
               <Undo className="h-4 w-4" />
             </Button>
-            <Button variant="ghost" size="icon" className="h-8 w-8">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              onClick={handleRedo}
+              disabled={!historyStatus?.canRedo}
+            >
               <Redo className="h-4 w-4" />
             </Button>
             <div className="w-px h-6 bg-border mx-2" />
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleAutoLayout} title="Auto Layout">
+              <ArrowDownUp className="h-4 w-4" />
+            </Button>
             <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleZoom(-0.1)}>
               <ZoomOut className="h-4 w-4" />
             </Button>
@@ -265,99 +444,191 @@ export function BuilderCanvas() {
               <Maximize2 className="h-4 w-4" />
             </Button>
             <div className="w-px h-6 bg-border mx-2" />
-            <Button variant="outline" size="sm" className="h-8 gap-2 bg-transparent">
-              <Play className="h-3.5 w-3.5" />
-              Preview
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              onClick={() => setShowVersionHistory(!showVersionHistory)}
+            >
+              <History className="h-4 w-4" />
             </Button>
-            <Button size="sm" className="h-8 gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 gap-2 bg-transparent"
+              onClick={() => setShowExecutionMonitor(!showExecutionMonitor)}
+            >
+              <Play className="h-3.5 w-3.5" />
+              {showExecutionMonitor ? "Close Monitor" : "Run Workflow"}
+            </Button>
+            <Button size="sm" className="h-8 gap-2" onClick={handleSaveVersion}>
               <Save className="h-3.5 w-3.5" />
               Save
             </Button>
           </div>
         </div>
 
-        {/* Canvas */}
         <div
           ref={canvasRef}
-          className="flex-1 relative overflow-hidden cursor-grab active:cursor-grabbing"
+          className="flex-1 relative overflow-hidden bg-gradient-to-br from-background via-background to-muted/20"
+          style={{ cursor: canvasState.isConnecting ? "crosshair" : isPanning ? "grabbing" : "grab" }}
           onWheel={handleWheel}
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseUp}
         >
-          {/* Grid Background */}
           <div
             className="canvas-grid absolute inset-0 pointer-events-none"
             style={{
               backgroundImage: `
-                radial-gradient(circle, hsl(var(--muted-foreground) / 0.15) 1px, transparent 1px)
+                radial-gradient(circle at center, hsl(var(--muted-foreground) / 0.15) 1.5px, transparent 1.5px),
+                radial-gradient(circle at center, hsl(var(--muted-foreground) / 0.08) 1px, transparent 1px)
               `,
-              backgroundSize: `${GRID_SIZE * canvasState.zoom}px ${GRID_SIZE * canvasState.zoom}px`,
+              backgroundSize: `${GRID_SIZE * canvasState.zoom * 5}px ${GRID_SIZE * canvasState.zoom * 5}px, ${GRID_SIZE * canvasState.zoom}px ${GRID_SIZE * canvasState.zoom}px`,
               backgroundPosition: `${canvasState.pan.x}px ${canvasState.pan.y}px`,
             }}
           />
 
-          {/* Nodes and Connections Container */}
           <div
-            className="absolute"
+            className="absolute transition-transform duration-75 ease-out"
             style={{
               transform: `translate(${canvasState.pan.x}px, ${canvasState.pan.y}px) scale(${canvasState.zoom})`,
               transformOrigin: "0 0",
             }}
           >
-            {/* Connections SVG */}
             <svg
               className="absolute top-0 left-0 pointer-events-none"
               style={{ width: "10000px", height: "10000px", overflow: "visible" }}
             >
               <defs>
-                <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
-                  <polygon points="0 0, 10 3.5, 0 7" fill="hsl(var(--muted-foreground))" />
+                {/* Enhanced arrowheads with gradients */}
+                <marker id="arrowhead" markerWidth="14" markerHeight="10" refX="13" refY="5" orient="auto">
+                  <polygon
+                    points="0 0, 14 5, 0 10"
+                    fill="hsl(var(--muted-foreground) / 0.6)"
+                    className="transition-all duration-200"
+                  />
                 </marker>
+                <marker id="arrowhead-primary" markerWidth="14" markerHeight="10" refX="13" refY="5" orient="auto">
+                  <polygon points="0 0, 14 5, 0 10" fill="hsl(var(--primary))" />
+                </marker>
+                <marker id="arrowhead-hover" markerWidth="14" markerHeight="10" refX="13" refY="5" orient="auto">
+                  <polygon points="0 0, 14 5, 0 10" fill="hsl(var(--primary) / 0.8)" />
+                </marker>
+
+                {/* Gradient for connections */}
+                <linearGradient id="connectionGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                  <stop offset="0%" stopColor="hsl(var(--primary) / 0.3)" />
+                  <stop offset="50%" stopColor="hsl(var(--primary) / 0.6)" />
+                  <stop offset="100%" stopColor="hsl(var(--primary))" />
+                </linearGradient>
+
+                {/* Glow filter for active connections */}
+                <filter id="glow">
+                  <feGaussianBlur stdDeviation="2" result="coloredBlur" />
+                  <feMerge>
+                    <feMergeNode in="coloredBlur" />
+                    <feMergeNode in="SourceGraphic" />
+                  </feMerge>
+                </filter>
               </defs>
+
               {workflow?.connections.map((connection) => {
                 const sourceNode = workflow.nodes.find((n) => n.id === connection.sourceId)
                 const targetNode = workflow.nodes.find((n) => n.id === connection.targetId)
                 if (!sourceNode || !targetNode) return null
 
+                const isSelected = canvasState.selectedConnectionId === connection.id
+
                 return (
-                  <path
-                    key={connection.id}
-                    d={getConnectionPath(sourceNode, targetNode)}
-                    fill="none"
-                    stroke="hsl(var(--muted-foreground))"
-                    strokeWidth={2}
-                    markerEnd="url(#arrowhead)"
-                    className={cn(
-                      "transition-colors",
-                      canvasState.selectedConnectionId === connection.id && "stroke-primary",
-                    )}
-                  />
+                  <g key={connection.id} className="connection-group">
+                    {/* Shadow/glow layer */}
+                    <path
+                      d={getConnectionPath(sourceNode, targetNode)}
+                      fill="none"
+                      stroke="hsl(var(--primary) / 0.15)"
+                      strokeWidth={isSelected ? 12 : 8}
+                      className="pointer-events-none transition-all duration-300"
+                    />
+                    {/* Main connection line */}
+                    <path
+                      d={getConnectionPath(sourceNode, targetNode)}
+                      fill="none"
+                      stroke={isSelected ? "hsl(var(--primary))" : "hsl(var(--muted-foreground) / 0.4)"}
+                      strokeWidth={isSelected ? 3 : 2.5}
+                      markerEnd={isSelected ? "url(#arrowhead-primary)" : "url(#arrowhead)"}
+                      className={cn(
+                        "transition-all duration-200 cursor-pointer",
+                        "hover:stroke-primary hover:stroke-[3.5px]",
+                      )}
+                      style={{ filter: isSelected ? "url(#glow)" : "none" }}
+                    />
+                  </g>
                 )
               })}
 
-              {/* Connection in progress */}
               {canvasState.isConnecting && canvasState.connectionStart && (
-                <path
-                  d={(() => {
-                    const sourceNode = workflow?.nodes.find((n) => n.id === canvasState.connectionStart?.nodeId)
-                    if (!sourceNode) return ""
-                    const sourceX = sourceNode.position.x + 140
-                    const sourceY = sourceNode.position.y + 40
-                    const dx = mousePos.x - sourceX
-                    const controlPointOffset = Math.min(Math.abs(dx) / 2, 100)
-                    return `M ${sourceX} ${sourceY} C ${sourceX + controlPointOffset} ${sourceY}, ${mousePos.x - controlPointOffset} ${mousePos.y}, ${mousePos.x} ${mousePos.y}`
-                  })()}
-                  fill="none"
-                  stroke="hsl(var(--primary))"
-                  strokeWidth={2}
-                  strokeDasharray="5,5"
-                />
+                <g className="active-connection">
+                  {/* Glow effect */}
+                  <path
+                    d={(() => {
+                      const sourceNode = workflow?.nodes.find((n) => n.id === canvasState.connectionStart?.nodeId)
+                      if (!sourceNode) return ""
+                      const sourceX = sourceNode.position.x + 150
+                      const sourceY = sourceNode.position.y + 40
+                      const dx = mousePos.x - sourceX
+                      const controlPointOffset = Math.min(Math.abs(dx) / 2, 100)
+                      return `M ${sourceX} ${sourceY} C ${sourceX + controlPointOffset} ${sourceY}, ${mousePos.x - controlPointOffset} ${mousePos.y}, ${mousePos.x} ${mousePos.y}`
+                    })()}
+                    fill="none"
+                    stroke="hsl(var(--primary) / 0.3)"
+                    strokeWidth={12}
+                    className="pointer-events-none"
+                  />
+                  {/* Main line */}
+                  <path
+                    d={(() => {
+                      const sourceNode = workflow?.nodes.find((n) => n.id === canvasState.connectionStart?.nodeId)
+                      if (!sourceNode) return ""
+                      const sourceX = sourceNode.position.x + 150
+                      const sourceY = sourceNode.position.y + 40
+                      const dx = mousePos.x - sourceX
+                      const controlPointOffset = Math.min(Math.abs(dx) / 2, 100)
+                      return `M ${sourceX} ${sourceY} C ${sourceX + controlPointOffset} ${sourceY}, ${mousePos.x - controlPointOffset} ${mousePos.y}, ${mousePos.x} ${mousePos.y}`
+                    })()}
+                    fill="none"
+                    stroke="url(#connectionGradient)"
+                    strokeWidth={3.5}
+                    strokeDasharray="12,6"
+                    strokeLinecap="round"
+                    className="pointer-events-none"
+                    style={{
+                      animation: "dashOffset 1s linear infinite",
+                      filter: "url(#glow)",
+                    }}
+                  />
+                  {/* Target indicator circle */}
+                  <circle
+                    cx={mousePos.x}
+                    cy={mousePos.y}
+                    r={8}
+                    fill="hsl(var(--primary) / 0.2)"
+                    stroke="hsl(var(--primary))"
+                    strokeWidth={2.5}
+                    className="pointer-events-none animate-pulse"
+                  />
+                  <circle
+                    cx={mousePos.x}
+                    cy={mousePos.y}
+                    r={4}
+                    fill="hsl(var(--primary))"
+                    className="pointer-events-none"
+                  />
+                </g>
               )}
             </svg>
 
-            {/* Nodes */}
             {workflow?.nodes.map((node) => (
               <CanvasNode
                 key={node.id}
@@ -370,47 +641,70 @@ export function BuilderCanvas() {
                 onConnectionEnd={() => handleConnectionEnd(node.id)}
                 isConnecting={canvasState.isConnecting}
                 zoom={canvasState.zoom}
+                isHighlighted={highlightedNodeId === node.id}
               />
             ))}
           </div>
 
-          {/* Mini Map */}
-          <div className="absolute bottom-4 right-4 w-48 h-32 bg-card border border-border rounded-lg overflow-hidden">
-            <div className="absolute inset-0 p-2">
-              <div className="relative w-full h-full">
-                {workflow?.nodes.map((node) => (
-                  <div
-                    key={node.id}
-                    className={cn(
-                      "absolute w-3 h-2 rounded-sm",
-                      node.type === "start" && "bg-emerald-500",
-                      node.type === "end" && "bg-rose-500",
-                      node.type === "agent" && "bg-blue-500",
-                      node.type === "guardrail" && "bg-amber-500",
-                      node.type === "condition" && "bg-purple-500",
-                      node.type === "mcp" && "bg-cyan-500",
-                      node.type === "user-approval" && "bg-orange-500",
-                      node.type === "file-search" && "bg-teal-500",
-                    )}
-                    style={{
-                      left: `${(node.position.x / 1000) * 100}%`,
-                      top: `${(node.position.y / 600) * 100}%`,
-                    }}
-                  />
-                ))}
+          <div className="absolute bottom-4 right-4 w-48 h-32 bg-card/95 backdrop-blur-sm border border-border rounded-lg p-3 shadow-lg">
+            <div className="text-xs space-y-1.5">
+              <div className="font-semibold text-foreground mb-2 flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+                Keyboard Shortcuts
+              </div>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-muted-foreground">
+                <div>
+                  <kbd className="px-1.5 py-0.5 bg-muted rounded text-[10px] font-mono">Ctrl+Z</kbd> Undo
+                </div>
+                <div>
+                  <kbd className="px-1.5 py-0.5 bg-muted rounded text-[10px] font-mono">Ctrl+Y</kbd> Redo
+                </div>
+                <div>
+                  <kbd className="px-1.5 py-0.5 bg-muted rounded text-[10px] font-mono">Ctrl+C</kbd> Copy
+                </div>
+                <div>
+                  <kbd className="px-1.5 py-0.5 bg-muted rounded text-[10px] font-mono">Ctrl+V</kbd> Paste
+                </div>
+                <div>
+                  <kbd className="px-1.5 py-0.5 bg-muted rounded text-[10px] font-mono">Ctrl+D</kbd> Duplicate
+                </div>
+                <div>
+                  <kbd className="px-1.5 py-0.5 bg-muted rounded text-[10px] font-mono">Del</kbd> Delete
+                </div>
+                <div>
+                  <kbd className="px-1.5 py-0.5 bg-muted rounded text-[10px] font-mono">Ctrl+S</kbd> Save
+                </div>
+                <div>
+                  <kbd className="px-1.5 py-0.5 bg-muted rounded text-[10px] font-mono">Ctrl+Shift+L</kbd> Layout
+                </div>
               </div>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Properties Panel */}
       <NodePropertiesPanel
         isOpen={showProperties}
         onToggle={() => setShowProperties(!showProperties)}
         node={selectedNode}
         workflowId={workflowId}
         onUpdate={() => mutate(`/api/workflows/${workflowId}`)}
+      />
+
+      <VersionHistoryPanel
+        workflowId={workflowId}
+        isOpen={showVersionHistory}
+        onToggle={() => setShowVersionHistory(!showVersionHistory)}
+        onRestoreVersion={(version) => {
+          console.log("Restoring version:", version)
+        }}
+      />
+
+      <ExecutionMonitor
+        workflowId={workflowId}
+        isOpen={showExecutionMonitor}
+        onClose={() => setShowExecutionMonitor(false)}
+        onNodeHighlight={setHighlightedNodeId}
       />
     </div>
   )

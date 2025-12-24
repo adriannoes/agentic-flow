@@ -85,3 +85,57 @@ export const NODE_ICONS: Record<NodeType, string> = {
   "user-approval": "UserCheck",
   "file-search": "FileSearch",
 }
+
+export interface WorkflowExecution {
+  id: string
+  workflowId: string
+  status: "running" | "completed" | "failed" | "paused"
+  startedAt: Date
+  completedAt?: Date
+  currentNodeId?: string
+  context: ExecutionContext
+  logs: ExecutionLog[]
+}
+
+export interface ExecutionContext {
+  input: string
+  variables: Record<string, unknown>
+  messages: Array<{ role: string; content: string }>
+}
+
+export interface ExecutionLog {
+  id: string
+  nodeId: string
+  timestamp: Date
+  type: "info" | "success" | "error" | "tool-call" | "tool-result"
+  message: string
+  data?: unknown
+  duration?: number
+}
+
+export interface NodeExecutionResult {
+  success: boolean
+  output?: unknown
+  error?: string
+  logs: ExecutionLog[]
+  nextNodeId?: string
+}
+
+export interface WorkflowVersion {
+  id: string
+  workflowId: string
+  version: number
+  name: string
+  description?: string
+  nodes: WorkflowNode[]
+  connections: Connection[]
+  createdAt: Date
+  createdBy?: string
+  tags?: string[]
+}
+
+export interface VersionComparison {
+  added: { nodes: WorkflowNode[]; connections: Connection[] }
+  removed: { nodes: WorkflowNode[]; connections: Connection[] }
+  modified: { nodes: Array<{ old: WorkflowNode; new: WorkflowNode }> }
+}
