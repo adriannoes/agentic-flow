@@ -1,5 +1,8 @@
 import { ConnectorRegistry } from "@/components/connector-registry"
 
+export const dynamic = "force-dynamic"
+
+
 export default function ConnectorsPage() {
   return (
     <div className="flex-1 overflow-auto">
