@@ -10,7 +10,7 @@ const _geist = Geist({ subsets: ["latin"] })
 const _geistMono = Geist_Mono({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
-  title: "AgentKit - AI Agent Platform",
+  title: "Open Agent Flow - Agent Studio",
   description: "Build, configure, and run AI agents with tool execution capabilities",
   generator: "Next.js",
   icons: {

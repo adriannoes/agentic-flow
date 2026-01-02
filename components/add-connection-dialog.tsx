@@ -135,7 +135,7 @@ export function AddConnectionDialog({ open, onOpenChange, connector, onSuccess }
                   </p>
                 </div>
                 <div className="text-xs text-muted-foreground space-y-1">
-                  <p>This will grant AgentKit permission to:</p>
+                  <p>This will grant Open Agent Flow permission to:</p>
                   <ul className="list-disc list-inside pl-2">
                     <li>Read your data</li>
                     <li>Write to your account</li>

@@ -51,20 +51,20 @@ export function Sidebar() {
 
     setIsSupabaseEnabled(true)
 
-    supabase.auth.getUser().then(({ data: { user } }) => {
+    supabase.auth.getUser().then(({ data: { user } }: any) => {
       if (user) {
         supabase
           .from("profiles")
           .select("*")
           .eq("id", user.id)
           .single()
-          .then(({ data }) => setUser(data))
+          .then(({ data }: any) => setUser(data))
       }
     })
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (event, session) => {
+    } = supabase.auth.onAuthStateChange(async (event: any, session: any) => {
       if (session?.user) {
         const { data } = await supabase.from("profiles").select("*").eq("id", session.user.id).single()
         setUser(data)
@@ -89,7 +89,7 @@ export function Sidebar() {
             <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary">
               <Bot className="w-5 h-5 text-primary-foreground" />
             </div>
-            <span className="font-semibold text-lg">AgentKit</span>
+            <span className="font-semibold text-lg">Open Agent Flow</span>
           </div>
         )}
         <Button
@@ -132,7 +132,7 @@ export function Sidebar() {
         ) : (
           !collapsed && (
             <div className="text-xs text-muted-foreground">
-              <p>AgentKit v1.0</p>
+              <p>Open Agent Flow v1.0</p>
               <p className="mt-1">Powered by AI SDK</p>
             </div>
           )

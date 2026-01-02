@@ -28,7 +28,7 @@ export function SettingsPanel() {
     <div className="p-8 max-w-4xl">
       <div className="mb-8">
         <h1 className="text-3xl font-bold mb-2">Settings</h1>
-        <p className="text-muted-foreground">Configure your AgentKit preferences</p>
+        <p className="text-muted-foreground">Configure your Open Agent Flow preferences</p>
       </div>
 
       <Tabs defaultValue="general" className="space-y-6">
@@ -158,7 +158,7 @@ export function SettingsPanel() {
           <Card>
             <CardHeader>
               <CardTitle>Appearance</CardTitle>
-              <CardDescription>Customize how AgentKit looks</CardDescription>
+              <CardDescription>Customize how Open Agent Flow looks</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
               <div className="space-y-2">
