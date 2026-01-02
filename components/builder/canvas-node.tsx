@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState, useCallback, useRef } from "react"
+import { useState, useCallback, useRef, useEffect } from "react"
 import { Bot, Shield, GitBranch, Plug, UserCheck, FileSearch, Play, Square, Trash2, GripVertical } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { WorkflowNode, Position, NodeType } from "@/lib/workflow-types"
@@ -50,6 +50,7 @@ interface CanvasNodeProps {
   isSelected: boolean
   onSelect: () => void
   onDrag: (position: Position) => void
+  onDragEnd: (position: Position) => void
   onDelete: () => void
   onConnectionStart: (handle: string) => void
   onConnectionEnd: () => void
@@ -63,6 +64,7 @@ export function CanvasNode({
   isSelected,
   onSelect,
   onDrag,
+  onDragEnd,
   onDelete,
   onConnectionStart,
   onConnectionEnd,
@@ -72,8 +74,16 @@ export function CanvasNode({
 }: CanvasNodeProps) {
   const [isDragging, setIsDragging] = useState(false)
   const [dragOffset, setDragOffset] = useState<Position>({ x: 0, y: 0 })
+  const [localPosition, setLocalPosition] = useState<Position>(node.position)
   const [isHovered, setIsHovered] = useState(false)
   const nodeRef = useRef<HTMLDivElement>(null)
+
+  // Sync local position with node position when not dragging
+  useEffect(() => {
+    if (!isDragging) {
+      setLocalPosition(node.position)
+    }
+  }, [node.position, isDragging])
 
   const Icon = NODE_ICONS[node.type]
   const colors = NODE_COLORS[node.type]
@@ -85,21 +95,31 @@ export function CanvasNode({
 
       onSelect()
       setIsDragging(true)
-      setDragOffset({
+
+      const startOffset = {
         x: e.clientX / zoom - node.position.x,
         y: e.clientY / zoom - node.position.y,
-      })
+      }
+      setDragOffset(startOffset)
+
+      let currentPosition = node.position
 
       const handleMouseMove = (moveEvent: MouseEvent) => {
         const newPosition = {
-          x: moveEvent.clientX / zoom - dragOffset.x,
-          y: moveEvent.clientY / zoom - dragOffset.y,
+          x: moveEvent.clientX / zoom - startOffset.x,
+          y: moveEvent.clientY / zoom - startOffset.y,
         }
+        currentPosition = newPosition
+        // Update local position for smooth visual feedback
+        setLocalPosition(newPosition)
+        // Also call onDrag for connection line updates
         onDrag(newPosition)
       }
 
       const handleMouseUp = () => {
         setIsDragging(false)
+        // Only call API on drag end
+        onDragEnd(currentPosition)
         document.removeEventListener("mousemove", handleMouseMove)
         document.removeEventListener("mouseup", handleMouseUp)
       }
@@ -107,7 +127,7 @@ export function CanvasNode({
       document.addEventListener("mousemove", handleMouseMove)
       document.addEventListener("mouseup", handleMouseUp)
     },
-    [node.position, onSelect, onDrag, zoom, dragOffset],
+    [node.position, onSelect, onDrag, onDragEnd, zoom],
   )
 
   const handleOutputMouseDown = useCallback(
@@ -132,7 +152,9 @@ export function CanvasNode({
     <div
       ref={nodeRef}
       className={cn(
-        "absolute w-[300px] bg-card/98 backdrop-blur-md border-2 rounded-xl transition-all duration-300 ease-out",
+        "absolute w-[300px] bg-card/98 backdrop-blur-md border-2 rounded-xl ease-out",
+        // Disable transitions during drag for smooth movement
+        !isDragging && "transition-all duration-300",
         "hover:shadow-2xl hover:-translate-y-0.5",
         colors.border,
         colors.glow,
@@ -142,8 +164,8 @@ export function CanvasNode({
         !isDragging && "cursor-grab hover:border-opacity-80",
       )}
       style={{
-        left: node.position.x,
-        top: node.position.y,
+        left: localPosition.x,
+        top: localPosition.y,
       }}
       onMouseDown={handleMouseDown}
       onMouseEnter={() => setIsHovered(true)}

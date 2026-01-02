@@ -116,7 +116,30 @@ export function BuilderCanvas() {
     setCanvasState((prev) => ({ ...prev, selectedNodeId: nodeId, selectedConnectionId: null }))
   }, [])
 
+  // Visual update during drag - no API call
   const handleNodeDrag = useCallback(
+    (nodeId: string, position: Position) => {
+      // Only update SWR cache optimistically for connection lines
+      // The actual node position is managed by localPosition in CanvasNode
+      mutate(
+        `/api/workflows/${workflowId}`,
+        (current: Workflow | undefined) => {
+          if (!current) return current
+          return {
+            ...current,
+            nodes: current.nodes.map((n) =>
+              n.id === nodeId ? { ...n, position } : n
+            ),
+          }
+        },
+        { revalidate: false }
+      )
+    },
+    [workflowId],
+  )
+
+  // API call only on drag end
+  const handleNodeDragEnd = useCallback(
     async (nodeId: string, position: Position) => {
       saveToHistory()
 
@@ -636,6 +659,7 @@ export function BuilderCanvas() {
                 isSelected={canvasState.selectedNodeId === node.id}
                 onSelect={() => handleNodeSelect(node.id)}
                 onDrag={(pos) => handleNodeDrag(node.id, pos)}
+                onDragEnd={(pos) => handleNodeDragEnd(node.id, pos)}
                 onDelete={() => handleNodeDelete(node.id)}
                 onConnectionStart={(handle) => handleConnectionStart(node.id, handle)}
                 onConnectionEnd={() => handleConnectionEnd(node.id)}

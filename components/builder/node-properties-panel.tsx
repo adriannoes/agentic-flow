@@ -22,7 +22,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
 import type { WorkflowNode, NodeType } from "@/lib/workflow-types"
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 
 interface NodePropertiesPanelProps {
   isOpen: boolean
@@ -58,23 +58,65 @@ const GUARDRAIL_TYPES = [
 
 export function NodePropertiesPanel({ isOpen, onToggle, node, workflowId, onUpdate }: NodePropertiesPanelProps) {
   const [formData, setFormData] = useState<WorkflowNode["data"]>(node?.data || { label: "" })
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle")
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const currentNodeIdRef = useRef<string | null>(null)
 
   useEffect(() => {
     if (node) {
+      // Reset save status when switching nodes
+      if (currentNodeIdRef.current !== node.id) {
+        setSaveStatus("idle")
+        currentNodeIdRef.current = node.id
+      }
       setFormData(node.data)
     }
   }, [node])
 
-  const handleSave = async () => {
+  // Auto-save with debounce
+  const saveData = useCallback(async (data: WorkflowNode["data"]) => {
     if (!node) return
 
-    await fetch(`/api/workflows/${workflowId}/nodes/${node.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ data: formData }),
-    })
-    onUpdate()
-  }
+    setSaveStatus("saving")
+
+    try {
+      await fetch(`/api/workflows/${workflowId}/nodes/${node.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ data }),
+      })
+      onUpdate()
+      setSaveStatus("saved")
+
+      // Reset to idle after 2 seconds
+      setTimeout(() => setSaveStatus("idle"), 2000)
+    } catch {
+      setSaveStatus("idle")
+    }
+  }, [node, workflowId, onUpdate])
+
+  const handleChange = useCallback((newData: WorkflowNode["data"]) => {
+    setFormData(newData)
+
+    // Clear existing timeout
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current)
+    }
+
+    // Set new debounced save
+    saveTimeoutRef.current = setTimeout(() => {
+      saveData(newData)
+    }, 500)
+  }, [saveData])
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current)
+      }
+    }
+  }, [])
 
   const Icon = node ? NODE_ICONS[node.type] : Settings2
 
@@ -115,7 +157,7 @@ export function NodePropertiesPanel({ isOpen, onToggle, node, workflowId, onUpda
                   <Input
                     id="label"
                     value={formData.label}
-                    onChange={(e) => setFormData({ ...formData, label: e.target.value })}
+                    onChange={(e) => handleChange({ ...formData, label: e.target.value })}
                   />
                 </div>
 
@@ -125,7 +167,7 @@ export function NodePropertiesPanel({ isOpen, onToggle, node, workflowId, onUpda
                   <Textarea
                     id="description"
                     value={formData.description || ""}
-                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                    onChange={(e) => handleChange({ ...formData, description: e.target.value })}
                     rows={2}
                   />
                 </div>
@@ -137,7 +179,7 @@ export function NodePropertiesPanel({ isOpen, onToggle, node, workflowId, onUpda
                       <Label htmlFor="model">Model</Label>
                       <Select
                         value={formData.model || "gpt-4o"}
-                        onValueChange={(value) => setFormData({ ...formData, model: value })}
+                        onValueChange={(value) => handleChange({ ...formData, model: value })}
                       >
                         <SelectTrigger>
                           <SelectValue />
@@ -157,7 +199,7 @@ export function NodePropertiesPanel({ isOpen, onToggle, node, workflowId, onUpda
                       <Textarea
                         id="systemPrompt"
                         value={formData.systemPrompt || ""}
-                        onChange={(e) => setFormData({ ...formData, systemPrompt: e.target.value })}
+                        onChange={(e) => handleChange({ ...formData, systemPrompt: e.target.value })}
                         rows={4}
                         placeholder="You are a helpful assistant..."
                       />
@@ -172,7 +214,7 @@ export function NodePropertiesPanel({ isOpen, onToggle, node, workflowId, onUpda
                     <Select
                       value={formData.guardrailType || "jailbreak"}
                       onValueChange={(value) =>
-                        setFormData({ ...formData, guardrailType: value as "jailbreak" | "pii" | "custom" })
+                        handleChange({ ...formData, guardrailType: value as "jailbreak" | "pii" | "custom" })
                       }
                     >
                       <SelectTrigger>
@@ -196,7 +238,7 @@ export function NodePropertiesPanel({ isOpen, onToggle, node, workflowId, onUpda
                     <Textarea
                       id="condition"
                       value={formData.condition || ""}
-                      onChange={(e) => setFormData({ ...formData, condition: e.target.value })}
+                      onChange={(e) => handleChange({ ...formData, condition: e.target.value })}
                       rows={3}
                       placeholder="e.g., intent === 'support'"
                       className="font-mono text-sm"
@@ -211,18 +253,35 @@ export function NodePropertiesPanel({ isOpen, onToggle, node, workflowId, onUpda
                     <Input
                       id="mcpServer"
                       value={formData.mcpServer || ""}
-                      onChange={(e) => setFormData({ ...formData, mcpServer: e.target.value })}
+                      onChange={(e) => handleChange({ ...formData, mcpServer: e.target.value })}
                       placeholder="https://mcp.example.com"
                     />
                   </div>
                 )}
               </div>
 
-              {/* Footer */}
+              {/* Footer - Auto-save Status */}
               <div className="p-4 border-t border-border">
-                <Button className="w-full" onClick={handleSave}>
-                  Save Changes
-                </Button>
+                <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                  {saveStatus === "saving" && (
+                    <>
+                      <div className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                      <span>Saving...</span>
+                    </>
+                  )}
+                  {saveStatus === "saved" && (
+                    <>
+                      <div className="w-2 h-2 rounded-full bg-emerald-500" />
+                      <span className="text-emerald-500">Saved ✓</span>
+                    </>
+                  )}
+                  {saveStatus === "idle" && (
+                    <>
+                      <div className="w-2 h-2 rounded-full bg-muted-foreground/40" />
+                      <span>Auto-save enabled</span>
+                    </>
+                  )}
+                </div>
               </div>
             </>
           ) : (
