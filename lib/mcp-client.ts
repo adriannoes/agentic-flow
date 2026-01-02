@@ -203,7 +203,7 @@ class MCPClient {
     }
 
     // Simulate MCP tool call
-    console.log(`[v0] Calling MCP tool ${toolName} on server ${server.name}`, args)
+    console.log(`[MCP] Calling tool ${toolName} on server ${server.name}`, args)
 
     // Return mock response based on tool type
     if (toolName === "read_file") {

@@ -38,7 +38,7 @@ export default function SetupPage() {
           setSupabaseUrl(data.url || "")
         }
       } catch (error) {
-        console.error("[v0] Error checking env:", error)
+        console.error("[Setup] Error checking env:", error)
       }
     }
     checkEnv()
@@ -225,9 +225,9 @@ export default function SetupPage() {
             </div>
 
             <div className="space-y-2">
-              <h3 className="font-semibold">Step 4: Add Environment Variables in v0</h3>
+              <h3 className="font-semibold">Step 4: Add Environment Variables</h3>
               <p className="text-sm text-muted-foreground">
-                Click <strong>Vars</strong> in the v0 sidebar and add:
+                Add the following environment variables to your <code>.env.local</code> file:
               </p>
               <div className="space-y-1">
                 <code className="block rounded bg-muted px-2 py-1 text-xs">

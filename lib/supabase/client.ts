@@ -8,7 +8,7 @@ export function isSupabaseConfigured() {
 
 export function getSupabaseBrowserClient() {
   if (!isSupabaseConfigured()) {
-    console.log("[v0] Supabase not configured - auth features disabled")
+    console.log("[Auth] Supabase not configured - auth features disabled")
     return null
   }
 

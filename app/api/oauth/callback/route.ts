@@ -40,12 +40,12 @@ export async function GET(request: Request) {
       },
     })
 
-    console.log(`[v0] OAuth connection created:`, connection.id)
+    console.log(`[OAuth] OAuth connection created:`, connection.id)
 
     // Redirect back to connectors page with success
     return NextResponse.redirect(new URL("/connectors?success=connected", request.url))
   } catch (error) {
-    console.error("[v0] OAuth callback error:", error)
+    console.error("[OAuth] OAuth callback error:", error)
     return NextResponse.redirect(
       new URL(`/connectors?error=${encodeURIComponent((error as Error).message)}`, request.url),
     )

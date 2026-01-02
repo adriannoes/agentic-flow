@@ -136,7 +136,7 @@ class OAuthManager {
 
     // In a real implementation, this would make an actual HTTP request to the token endpoint
     // For demo purposes, we'll return mock tokens
-    console.log(`[v0] Exchanging code for token with provider ${provider.name}`)
+    console.log(`[OAuth] Exchanging code for token with provider ${provider.name}`)
 
     return {
       accessToken: `mock_access_token_${Date.now()}`,
@@ -155,7 +155,7 @@ class OAuthManager {
     }
 
     // In a real implementation, this would make an actual HTTP request
-    console.log(`[v0] Refreshing token for provider ${provider.name}`)
+    console.log(`[OAuth] Refreshing token for provider ${provider.name}`)
 
     return {
       accessToken: `mock_refreshed_token_${Date.now()}`,
